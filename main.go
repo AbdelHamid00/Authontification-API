@@ -9,16 +9,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 	"golang.org/x/crypto/bcrypt"
-	"github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/v4"
 	"time"
 	"github.com/joho/godotenv"
+	"fmt"
+	"net/http"
 )
 
 var (
 	DB *gorm.DB
 	FD *os.File
 )
-
+// type Clientmodel struct {
+// 	login string `json: "login" binding:"required"`
+// 	password string `json: "password" binding:"required"`
+// }
 func SetupLogOutput() {
 	FD, _ = os.Create("LoginAPI.log")
 	gin.DefaultWriter = io.MultiWriter(FD, os.Stdout)
@@ -52,10 +57,7 @@ func main() {
 
 
 func SignupHandler(ctx *gin.Context) {
-	var client struct {
-		login		string
-		password	string
-	}
+	var client usermodel.Usermodel
 	err := ctx.BindJSON(&client)
 	if err != nil {
 		ctx.JSON(400, gin.H{
@@ -63,17 +65,17 @@ func SignupHandler(ctx *gin.Context) {
 		})
 		return
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(client.password), 10)
+	hash, err := bcrypt.GenerateFromPassword([]byte(client.Password), 14)
 	if err != nil {
 		ctx.JSON(400, gin.H{
 			"error": "Error Hashing the password",
 		})
 		return
 	}
-	user := usermodel.Usermodel{Login: client.login, Password: string(hash), Admin: false}
+	user := usermodel.Usermodel{Login: client.Login, Password: string(hash), Admin: false}
 	result := DB.Create(&user)
 	if result.Error != nil {
-		ctx.JSON(400, gin.H{
+		ctx.JSON(400, gin.H {
 			"error": "Error Creating the user",
 		})
 		return
@@ -83,10 +85,7 @@ func SignupHandler(ctx *gin.Context) {
 
 
 func LoginHandler(ctx *gin.Context) {
-	var client struct {
-		login		string
-		password	string
-	}
+	var client usermodel.Usermodel
 	err := ctx.BindJSON(&client)
 	if err != nil {
 		ctx.JSON(400, gin.H{
@@ -95,18 +94,19 @@ func LoginHandler(ctx *gin.Context) {
 		return 
 	}
 	var user usermodel.Usermodel
-	DB.First(&user, "email = ?", client.login)
+	DB.First(&user, "Login = ?", client.Login)
 	if user.ID == 0 {
 		ctx.JSON(400, gin.H{
-			"error": "Invalid Login or Password",
+			"error": "Invalid Login",
 		})
 		return 
 	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(client.password))
+	fmt.Println(user.Password)
+	err = bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(client.Password))
 	if err != nil {
-		ctx.JSON(400, gin.H{
-			"error": "Invalid Login or Password",
+		fmt.Println(err)
+		ctx.JSON(400, gin.H {
+			"error": "Invalid Password",
 		})
 		return
 	}
@@ -115,14 +115,17 @@ func LoginHandler(ctx *gin.Context) {
 		"sub": user.ID,
 		"exp": time.Now().Add(time.Hour * 24 * 30).Unix(),
 	})
-	_, err = token.SignedString(os.Getenv("SECRET"))
-	if err != nil {
+	tokenString, erno := token.SignedString([]byte(os.Getenv("SECRET")))
+	if erno != nil {
+		fmt.Println(err)
 		ctx.JSON(400, gin.H{
 			"error": "Failed to create the token",
 		})
 		return
 	}
-	ctx.JSON(200, gin.H{
-		"token": token,
-	})
+
+	ctx.SetSameSite(http.SameSiteLaxMode)
+	// To change this after we switch to https  true,false
+	ctx.SetCookie("Authorization", tokenString, 3600 * 24 * 30, "", "", false, true)
+	ctx.JSON(200, gin.H{})
 }
